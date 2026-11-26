@@ -1,0 +1,59 @@
+# High Dimensional Tops analysis
+
+Code for the BSM $t\bar t$ project: an unbinned (extended) matrix-element analysis that discriminates
+the Scalar, VLF and $Z'$ hypotheses. 
+
+## Repository layout
+
+```
+mem/                     Python package (logic of each module: mem/README.md)
+  config.py              paths, physics constants, model definitions and benchmarks
+  io.py                  LHE reading, kinematics, parton luminosities, HDF5 helpers
+  mg.py                  loading and evaluating the MadGraph matrix-element libraries
+  analysis.py            density ratios, Asimov deviance, Step A / Step B, binned limit, bootstrap
+  validation.py          independent LO integration and analytic Born matrix elements
+scripts/
+  prepare_events.py      LHE -> data/events*.h5 (weights, kinematics, PDF fluxes at 3 muF, alpha_s at 3 muR)
+  compute_me.py          events -> data/me_{Scalar,VLF,Zprime}*.h5 (resumable, one MG library per process)
+MEM_Asimov.ipynb         checks, binned reproduction of the paper, unbinned results (full sample)
+MEM_Asimov_s40.ipynb     the same on the 1-in-40 test subsample
+data/                    generated HDF5 files (local due the files size)
+processFolders/          MadGraph process folders: event generation and matrix-element libraries
+                         (see processFolders/README.md)
+mg5_bias_patch/          patch for MG5_aMC v3.6.3: correct event weights in biased generation
+UFO_Models/              UFO models of the Scalar, VLF and Z' implementations
+aux/                     f2py wrapper and makefile templates for the MadLoop libraries 
+                         MG5 patch test folders
+```
+
+## Running the analysis
+
+1. **Event sample.** The SM sample is an aMC@NLO fixed-order run of the Scalar UFO with `ydm = 0`
+   and only the $g_s^4$ contribution selected, generated with the bias patch in
+   `processFolders/sm/pp2ttbar_gs4` (recipe in `processFolders/README.md`, section 0; path in
+   `mem/config.py`, `SM_RUN`). The LHE files are too large for git.
+2. **Matrix-element libraries:** `cd processFolders && python3 build_matrix_elements.py`
+   (about 2 minutes; see `processFolders/README.md`).
+3. **Events and matrix elements.** The full sample (2.4M events, all three models, 9 masses per
+   one-loop model) takes about 1 hour on 15 cores, about 13 CPU-hours:
+   ```bash
+   cd scripts
+   python3 prepare_events.py                                        # -> ../data/events.h5   (~3 min, ~0.5 GB)
+   nohup python3 compute_me.py --nproc 15 > ../data/compute_me.log 2>&1 &   # rerun the same command to resume
+   ```
+   The test subsample (every 40th event, about 4 min) is
+   `python3 prepare_events.py --stride 40 --out ../data/events_s40.h5`, then
+   `python3 compute_me.py --events ../data/events_s40.h5 --chunk 2500`.
+4. **Analysis:** `MEM_Asimov.ipynb` (`EVENTS = "data/events.h5"`), or `MEM_Asimov_s40.ipynb` for the
+   subsample.
+
+## Notes
+
+- Weights are normalised per generation channel (gg, $q\bar q$) with an independent LO integration.
+  Biased aMC@NLO fixed-order runs without the bias patch normalise each channel to its biased cross section.
+- The default PDF convention is $|f_a f_b|$ per ordered pair. The generator's signed weights are
+  converted channel by channel. `Sample(..., flux_mode="signed")` is a variation.
+- PDF replicas are not stored. Recompute them from $(x_1, x_2, \mu_0)$ with `mem.io.fluxes(..., get_pdf(member=k))`.
+- When generating with aMC@NLO, the columns of `#SelectedCouplingOrders` in `Cards/FKS_params.dat`
+  follow the order list in `SubProcesses/P*/orders.inc`, which differs between UFOs. For example, the
+  VLF list is `NP2, NP1, NP3, QCD, QED`, so its interference is `0 2 0 4 0`.
